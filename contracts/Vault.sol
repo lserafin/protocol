@@ -283,12 +283,24 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
 
     function decommission()
         public
-        /*pre_cond(version || owner || internal)*/
+        pre_cond(version || owner || internal)
     {
-        isDecommissioned = !isDecommissioned;
+        isDecommissioned = true;
     }
 
-    /*function proofEmbezzlement()*/
+    function submitProofOfEmbezzlement()
+        public
+    {
+        for (uint i = 0; i <= openOrderIds.lenght; ++i) {
+
+        }
+    }
+
+    function increaseStake () {}
+    function decreaseStake () {}
+    function getStake() constant returns (uint256) {}
+    function toogleSubscription() {}
+    function toogleRedeemal() {}
 
 
     // NON-CONSTANT METHODS - PARTICIPATION
