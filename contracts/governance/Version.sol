@@ -12,6 +12,7 @@ import '../dependencies/Logger.sol';
 contract Version is DBC, Owned {
 
     // TYPES
+
     enum Status {
         setup,
         funding,
@@ -20,6 +21,7 @@ contract Version is DBC, Owned {
     }
 
     // FIELDS
+
     // Fields that are only changed in constructor
     address public MELON_ASSET; // Adresss of Melon asset contract
     address public ASSET_REGISTRAR; // Address of Asset Registrar contract
@@ -34,6 +36,12 @@ contract Version is DBC, Owned {
 
     event VaultUpdated(uint id);
 
+    // PRE, POST, INVARIANT CONDITIONS
+
+    function isVaultOwner(uint256 id) internal returns (bool) {
+        return msg.sender == Vault(vaults[id]).owner(); // TODO using VaultInterface
+    }
+
     // CONSTANT METHODS
 
     function getMelonAsset() constant returns (address) { return MELON_ASSET; }
@@ -47,6 +55,7 @@ contract Version is DBC, Owned {
     }
 
     // NON-CONSTANT METHODS
+
     function Version(
         address ofMelonAsset,
         address ofAssetRegistrar,
@@ -70,7 +79,7 @@ contract Version is DBC, Owned {
     )
         returns (uint id)
     {
-        address vault = address(new Vault(
+        address vault = address(new Vault( // TODO using VaultInterface
             msg.sender,
             withName,
             withSymbol,
@@ -90,7 +99,7 @@ contract Version is DBC, Owned {
 
     // Dereference Vault and trigger selfdestruct
     function decommissionVault(uint id)
-        pre_cond(isOwner())
+        pre_cond(isVaultOwner(id) || isOwner())
     {
         // TODO also refund and selfdestruct vault contract
         delete vaults[id];

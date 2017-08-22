@@ -42,6 +42,7 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         setup,
         funding,
         managing,
+        accounting,
         locked,
         payout
     }
@@ -278,6 +279,18 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         });
     }
 
+    // NON-CONSTANT METHODS - ADMINISTRATION
+
+    function decommission()
+        public
+        /*pre_cond(version || owner || internal)*/
+    {
+        isDecommissioned = !isDecommissioned;
+    }
+
+    /*function proofEmbezzlement()*/
+
+
     // NON-CONSTANT METHODS - PARTICIPATION
 
     /// Pre: offeredValue denominated in [base unit of MELON_ASSET]
@@ -373,14 +386,14 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         request.requestStatus = RequestStatus.executed;
         if (isSubscribe(requests[requestId].requestType) &&
             isGreaterOrEqualThan(request.offeredOrRequestedValue, actualValue) // Sanity Check
-        ) { // Limit Order is OK
+        ) { // Subscription Limit Order is OK
             assert(MELON_CONTRACT.transferFrom(request.owner, msg.sender, request.incentive)); // Reward Worker
             uint remainder = request.offeredOrRequestedValue.sub(actualValue);
             if(remainder > 0) assert(MELON_CONTRACT.transfer(request.owner, remainder)); // Return remainder
             createShares(request.owner, request.numShares); // Accounting
         } else if (isRedeem(requests[requestId].requestType) &&
             isLessOrEqualThan(request.offeredOrRequestedValue, actualValue) // Sanity Check
-        ) {// Limit Order is OK
+        ) { // Redeemal Limit Order is OK
             assert(MELON_CONTRACT.transferFrom(request.owner, msg.sender, request.incentive)); // Reward Worker
             assert(MELON_CONTRACT.transfer(msg.sender, actualValue)); // Transfer value
             // No remainder to return

@@ -1,49 +1,12 @@
 pragma solidity ^0.4.11;
 
 import './ParticipationInterface.sol';
-import '../dependencies/DBC.sol';
-import '../dependencies/Owned.sol';
-
+import '../dependencies/Permissioned.sol';
 
 /// @title Participation Contract
 /// @author Melonport AG <team@melonport.com>
 /// @notice Simple and static Participation Module.
-contract Participation is ParticipationInterface, DBC, Owned {
-    //TODO: can we make this into a Permissioned contract?
-
-    // TYPES
-
-    struct Information { // subscription request
-        bool isApproved; // Eg: Lookup call to uPort registry
-    }
-
-    // FIELDS
-
-    // Fields that can be changed by functions
-    mapping (address => Information) public avatar;
-
-
-    // NON-CONSTANT NON-BOOLEAN METHODS
-
-    function list(address x)
-        pre_cond(isOwner())
-    {
-        avatar[x].isApproved = true;
-    }
-
-    function bulkList(address[] x)
-        pre_cond(isOwner())
-    {
-        for (uint i = 0; i < x.length; ++i) {
-            avatar[x[i]].isApproved = true;
-        }
-    }
-
-    function delist(address x)
-        pre_cond(isOwner())
-    {
-        avatar[x].isApproved = false;
-    }
+contract Participation is ParticipationInterface, Permissioned {
 
     // CONSTANT METHODS
 
@@ -57,7 +20,7 @@ contract Participation is ParticipationInterface, DBC, Owned {
         constant
         returns (bool)
     {
-        return avatar[owner].isApproved;
+        return isPermitted(owner);
     }
 
     /// Pre: Request ID
@@ -70,6 +33,6 @@ contract Participation is ParticipationInterface, DBC, Owned {
         constant
         returns (bool)
     {
-        return true;
+        return isPermitted(owner);
     }
 }
