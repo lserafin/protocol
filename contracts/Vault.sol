@@ -5,8 +5,8 @@ import './dependencies/DBC.sol';
 import './dependencies/Owned.sol';
 import './dependencies/Logger.sol';
 import './sphere/SphereInterface.sol';
+import './libraries/calculate.sol';
 import './libraries/safeMath.sol';
-import './libraries/rewards.sol';
 import './participation/ParticipationInterface.sol';
 import './datafeeds/DataFeedInterface.sol';
 import './riskmgmt/RiskMgmtInterface.sol';
@@ -200,61 +200,10 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
     /// Post: Gav, managementReward, performanceReward, unclaimedRewards, nav, sharePrice denominated in [base unit of melonAsset]
     function performCalculations() constant returns (uint, uint, uint, uint, uint, uint) {
         uint256 gav = calcGav(); // Reflects value indepentent of fees
-        var (managementReward, performanceReward, unclaimedRewards) = calcUnclaimedRewards(gav);
-        uint256 nav = calcNav(gav, unclaimedRewards);
-        uint256 sharePrice = isPastZero(totalSupply) ? calcValuePerShare(nav) : getMelonAssetBaseUnits(); // Handle potential division through zero by defining a default value
+        var (managementReward, performanceReward, unclaimedRewards) = calculate.unclaimedRewards(atLastPayout.timestamp, atLastPayout.sharePrice, MANAGEMENT_REWARD_RATE, PERFORMANCE_REWARD_RATE, DIVISOR_FEE, totalSupply, gav, getMelonAssetBaseUnits());
+        uint256 nav = calculate.netAssetValue(gav, unclaimedRewards);
+        uint256 sharePrice = isPastZero(totalSupply) ? calculate.valuePerShare(nav, getMelonAssetBaseUnits(), totalSupply) : getMelonAssetBaseUnits(); // Handle potential division through zero by defining a default value
         return (gav, managementReward, performanceReward, unclaimedRewards, nav, sharePrice);
-    }
-
-    /// Pre: Non-zero share supply; value denominated in [base unit of melonAsset]
-    /// Post: Share price denominated in [base unit of melonAsset * base unit of share / base unit of share] == [base unit of melonAsset]
-    function calcValuePerShare(uint256 value)
-        constant
-        pre_cond(isPastZero(totalSupply))
-        returns (uint256 valuePerShare)
-    {
-        valuePerShare = value.mul(getMelonAssetBaseUnits()).div(totalSupply);
-    }
-
-    /// Pre: Gross asset value and sum of all applicable and unclaimed fees has been calculated
-    /// Post: Net asset value denominated in [base unit of melonAsset]
-    function calcNav(uint256 gav, uint256 unclaimedRewards)
-        constant
-        returns (uint256 nav)
-    {
-        nav = gav.sub(unclaimedRewards);
-    }
-
-    /// Pre: Gross asset value has been calculated
-    /// Post: The sum and its individual parts of all applicable fees denominated in [base unit of melonAsset]
-    function calcUnclaimedRewards(uint256 gav)
-        constant
-        returns (
-            uint256 managementReward,
-            uint256 performanceReward,
-            uint256 unclaimedRewards
-        )
-    {
-        uint256 timeDifference = now.sub(atLastPayout.timestamp);
-        managementReward = rewards.managementReward(
-            MANAGEMENT_REWARD_RATE,
-            timeDifference,
-            gav,
-            DIVISOR_FEE
-        );
-        performanceReward = 0;
-        if (totalSupply != 0) {
-            uint256 currSharePrice = calcValuePerShare(gav); // TODO Multiply w getInvertedPrice(ofReferenceAsset)
-            if (currSharePrice > atLastPayout.sharePrice) {
-              performanceReward = rewards.performanceReward(
-                  PERFORMANCE_REWARD_RATE,
-                  int(currSharePrice - atLastPayout.sharePrice),
-                  totalSupply,
-                  DIVISOR_FEE
-              );
-            }
-        }
-        unclaimedRewards = managementReward.add(performanceReward);
     }
 
     /// Pre: Decimals in assets must be equal to decimals in PriceFeed for all entries in Universe

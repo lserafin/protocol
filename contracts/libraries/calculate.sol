@@ -4,22 +4,31 @@ import './safeMath.sol';
 import '../dependencies/ERC20.sol';
 import '../datafeeds/DataFeedInterface.sol';
 
-// Fully functional calculation library
 library calculate {
-    using safeMath for uint256;
+    using safeMath for uint;
 
     // CONSTANT METHODS - ACCOUNTING
+
+    /// Pre: Non-zero share supply; value denominated in [base unit of melonAsset]
+    /// Post: Share price denominated in [base unit of melonAsset * base unit of share / base unit of share] == [base unit of melonAsset]
+    function valuePerShare(uint value, uint mlnBaseUnits, uint totalSupply)
+        constant
+        returns (uint)
+    {
+        require(totalSupply > 0);
+        return value.mul(mlnBaseUnits).div(totalSupply);
+    }
 
     /// Pre: baseUnitsPerShare not zero
     /// Post: priceInRef denominated in [base unit of melonAsset]
     function priceForNumBaseShares(
-        uint256 numBaseShares,
-        uint256 baseUnitsPerShare,
-        uint256 value,
-        uint256 totalSupply
+        uint numBaseShares,
+        uint baseUnitsPerShare,
+        uint value,
+        uint totalSupply
     )
         constant
-        returns (uint256 sharePrice)
+        returns (uint sharePrice)
     {
         if (totalSupply > 0)
             sharePrice = value.mul(baseUnitsPerShare).div(totalSupply);
@@ -31,24 +40,79 @@ library calculate {
     /// Pre: Gross asset value and sum of all applicable and unclaimed fees has been calculated
     /// Post: Net asset value denominated in [base unit of melonAsset]
     function netAssetValue(
-        uint256 gav,
-        uint256 rewardsUnclaimed
+        uint gav,
+        uint rewardsUnclaimed
     )
         constant
-        returns (uint256)
+        returns (uint)
     {
         return gav.sub(rewardsUnclaimed);
     }
 
-    /// Pre: Decimals in assets must be equal to decimals in PriceFeed for all entries in Universe
-    /// Post: Gross asset value denominated in [base unit of referenceAsset]
-    function grossAssetValue(DataFeedInterface DataFeed) constant returns (uint256 gav) {
-        for (uint256 i = 0; i < DataFeed.numRegisteredAssets(); ++i) {
-            address ofAsset = address(DataFeed.getRegisteredAssetAt(i));
-            uint256 assetHoldings = ERC20(ofAsset).balanceOf(this); // Amount of asset base units this vault holds
-            uint256 assetPrice = DataFeed.getPrice(ofAsset);
-            uint256 assetDecimals = DataFeed.getDecimals(ofAsset);
-            gav = gav.add(assetHoldings.mul(assetPrice).div(10 ** uint(assetDecimals))); // Sum up product of asset holdings of this vault and asset prices
+    //  when timeDifference == 0, return 0
+    /// Post: Reward denominated in referenceAsset
+    function managementReward(
+        uint managementRewardRate,
+        uint timeDifference,
+        uint gav,
+        uint divisorFee
+    )
+        constant
+        returns (uint)
+    {
+        uint absoluteChange = timeDifference * gav;
+        return absoluteChange * managementRewardRate / divisorFee;
+    }
+
+    //  when timeDifference == 0, return 0
+    /// Post: Reward denominated in referenceAsset
+    function performanceReward(
+        uint performanceRewardRate,
+        int deltaPrice, // Price Difference measured agains referenceAsset
+        uint totalSupply,
+        uint divisorFee
+    )
+        constant
+        returns (uint)
+    {
+        if (deltaPrice <= 0) return 0;
+        uint absoluteChange = uint(deltaPrice) * totalSupply;
+        return absoluteChange * performanceRewardRate / divisorFee;
+    }
+
+    /// Pre: Gross asset value has been calculated
+    /// Post: The sum and its individual parts of all applicable fees denominated in [base unit of melonAsset]
+    function unclaimedRewards(
+      uint lastPayoutTime, uint lastPayoutPrice, uint managementRewardRate,
+      uint performanceRewardRate, uint feeDivisor, uint totalSupply, uint gav,
+      uint melonBaseUnits
+    )
+        constant
+        returns (
+            uint management,
+            uint performance,
+            uint unclaimed
+        )
+    {
+        uint timeDifference = now.sub(lastPayoutTime);
+        management = managementReward(
+            managementRewardRate,
+            timeDifference,
+            gav,
+            feeDivisor
+        );
+        performance = 0;
+        if (totalSupply != 0) {
+            uint currSharePrice = valuePerShare(gav, melonBaseUnits, totalSupply); //TODO: Multiply w getInvertedPrice(ofReferenceAsset)
+            if (currSharePrice > lastPayoutPrice) {
+                performance = performanceReward(
+                    performanceRewardRate,
+                    int(currSharePrice - lastPayoutPrice),
+                    totalSupply,
+                    feeDivisor
+                );
+            }
         }
+        unclaimed = management.add(performance);
     }
 }

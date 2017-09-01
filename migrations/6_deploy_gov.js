@@ -1,5 +1,4 @@
 const Calculate = artifacts.require('./calculate.sol');
-const Rewards = artifacts.require('./rewards.sol');
 const Governance = artifacts.require('./Governance.sol');
 const Logger = artifacts.require('./Logger.sol');
 const Version = artifacts.require('./Version.sol');
@@ -16,10 +15,8 @@ module.exports = (deployer, network) => {
     deployer.deploy(Governance)
     .then(() => deployer.deploy(Logger))
     .then(() => deployer.deploy(Calculate))
-    .then(() => deployer.deploy(Rewards))
+    .then(() => deployer.link(Calculate, Vault))
     .then(() => deployer.link(Calculate, Version))
-    .then(() => deployer.link(Rewards, Version))
-    .then(() => deployer.link(Rewards, Vault))
     .then(() => deployer.deploy(Version, mlnTokenAddress, Logger.address))
     .catch(e => { throw e; });
   }
