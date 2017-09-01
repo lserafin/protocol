@@ -32,18 +32,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         redeem
      }
 
-    enum OrderStatus {
-        open,
-        partiallyFilled,
-        fullyFilled,
-        cancelled
-    }
-
-    enum OrderType {
-        make,
-        take
-    }
-
     enum VaultStatus {
         setup,
         funding,
@@ -81,17 +69,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         uint256 timestamp;
     }
 
-    struct Order {
-        ERC20       haveToken;
-        ERC20       wantToken;
-        uint128     haveAmount;
-        uint128     wantAmount;
-        uint256     timestamp;
-        OrderStatus order_status;
-        OrderType   orderType;
-        uint256     quantity_filled; // Buy quantity filled; Always less than buy_quantity
-    }
-
     struct Calculations {
         uint256 gav;
         uint256 managementReward;
@@ -109,7 +86,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
     uint256 public constant MANAGEMENT_REWARD_RATE = 0; // Reward rate in REFERENCE_ASSET per delta improvment
     uint256 public constant PERFORMANCE_REWARD_RATE = 0; // Reward rate in REFERENCE_ASSET per managed seconds
     uint256 public constant DIVISOR_FEE = 10 ** 15; // Reward are divided by this number
-    uint256 public constant MAX_OPEN_ORDERS = 6; // Maximum number of open orders
     // Fields that are only changed in constructor
     string public name;
     string public symbol;
@@ -127,8 +103,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
     Modules public module;
     mapping (uint256 => Request) public requests;
     uint256 public nextRequestId;
-    mapping (uint256 => Order) public orders;
-    uint256[] openOrderIds = new uint256[](MAX_OPEN_ORDERS);
     uint256 public nextOrderId;
     Calculations public atLastPayout;
     bool public isShutDown;
@@ -149,14 +123,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
     function isEqualTo(uint256 x, uint256 y) internal returns (bool) { return x == y; }
     function isSubscribe(RequestType x) internal returns (bool) { return x == RequestType.subscribe; }
     function isRedeem(RequestType x) internal returns (bool) { return x == RequestType.redeem; }
-    function noOpenOrders()
-        internal
-        returns (bool) {
-        for (uint256 i = 0; i < openOrderIds.length; i++) {
-            if (openOrderIds[i] != 0) return false;
-        }
-        return true;
-    }
     function balancesOfHolderAtLeast(address ofHolder, uint256 x) internal returns (bool) { return balances[ofHolder] >= x; }
     function isValidAssetPair(address sell_which_token, address buy_which_token)
         internal
@@ -181,11 +147,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         require(nextRequestId > 0);
         return nextRequestId - 1;
     }
-    function getLastOrderId() constant returns (uint) {
-        require(nextOrderId > 0);
-        return nextOrderId - 1;
-    }
-
     // CONSTANT METHODS - ACCOUNTING
 
     /// Pre: None
@@ -212,7 +173,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         for (uint256 i = 0; i < module.pricefeed.numRegisteredAssets(); ++i) {
             address ofAsset = address(module.pricefeed.getRegisteredAssetAt(i));
             uint256 assetHoldings = ERC20(ofAsset).balanceOf(this); // Amount of asset base units this vault holds
-            assetHoldings = assetHoldings.add(getIntededSellAmount(ofAsset));
             uint256 assetPrice = module.pricefeed.getPrice(ofAsset);
             uint256 assetDecimals = module.pricefeed.getDecimals(ofAsset);
             gav = gav.add(assetHoldings.mul(assetPrice).div(10 ** uint(assetDecimals))); // Sum up product of asset holdings of this vault and asset prices
@@ -221,67 +181,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
     }
 
     //TODO: add previousHoldings
-    function closeOpenOrders(address ofBase, address ofQuote)
-        constant
-    {
-        for (uint i = 0; i < openOrderIds.length; i++) {
-            Order thisOrder = orders[openOrderIds[i]];
-            if (thisOrder.haveToken == ofBase && thisOrder.wantToken == ofQuote) {
-                proofOfEmbezzlement(ofBase, ofQuote);
-                delete openOrderIds[i]; // Free up open order slot
-                // TODO: fix pot incorrect OrderStatus - partiallyFilled
-                thisOrder.order_status = OrderStatus.fullyFilled;
-                //  update previousHoldings
-                // TODO: trigger for each proofOfEmbezzlement() call
-                previousHoldings[ofBase] = ERC20(ofBase).balanceOf(this);
-                previousHoldings[ofQuote] = ERC20(ofQuote).balanceOf(this);
-            }
-        }
-    }
-
-    //XXX: from perspective of vault
-    /// Pre: Specific asset pair (ofBase.ofQuote) where by convention ofBase is asset being sold and ofQuote asset being bhought
-    /// Post: True if embezzled otherwise false
-    function proofOfEmbezzlement(address ofBase, address ofQuote)
-        constant
-        returns (bool)
-    {
-        // Sold more than expected => Proof of Embezzlemnt
-        uint256 totalIntededSellAmount = getIntededSellAmount(ofBase); // Trade intention
-        if (isLargerThan(
-            previousHoldings[ofBase].sub(totalIntededSellAmount), // Intended amount sold
-            ERC20(ofBase).balanceOf(this) // Actual amount sold
-        )) {
-            isShutDown = true;
-            // Allocate staked shares from this to msg.sender
-            return true;
-        }
-        // Sold less or equal than intended
-        uint256 factor = 10000;
-        uint256 divisor = factor;
-        if (isLessThan(
-            previousHoldings[ofBase].sub(totalIntededSellAmount), // Intended amount sold
-            ERC20(ofBase).balanceOf(this) // Actual amount sold
-        )) { // Sold less than intended
-            factor = divisor
-                .mul(previousHoldings[ofBase].sub(ERC20(ofBase).balanceOf(this)))
-                .div(totalIntededSellAmount);
-        }
-
-        // Sold at a worse price than expected => Proof of Embezzlemnt
-        uint256 totalIntededBuyAmount = getIntededBuyAmount(ofQuote); // Trade execution
-        uint256 totalExpectedBuyAmount = totalIntededBuyAmount.mul(factor).div(divisor);
-        if (isLargerThan(
-            previousHoldings[ofQuote].add(totalExpectedBuyAmount), // Expected amount bhought
-            ERC20(ofQuote).balanceOf(this) // Actual amount sold
-        )) {
-            isShutDown = true;
-            // Allocate staked shares from this to msg.sender
-            return true;
-        }
-        return false;
-    }
-
     // NON-CONSTANT METHODS
 
     function Vault(
@@ -340,7 +239,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         pre_cond(isOwner())
         pre_cond(isPastZero(numShares))
         pre_cond(balancesOfHolderAtLeast(msg.sender, numShares))
-        pre_cond(noOpenOrders())
         post_cond(prevTotalSupply == totalSupply)
     {
         uint256 prevTotalSupply = totalSupply;
@@ -353,7 +251,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
         pre_cond(isPastZero(numShares))
         pre_cond(!isShutDown)
         pre_cond(balancesOfHolderAtLeast(this, numShares))
-        pre_cond(noOpenOrders())
         post_cond(prevTotalSupply == totalSupply)
     {
         uint256 prevTotalSupply = totalSupply;
@@ -550,103 +447,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
 
     // NON-CONSTANT METHODS - MANAGING
 
-    /// Pre: Sufficient balance and spending has been approved
-    /// Post: Make offer on selected Exchange
-    function makeOrder(
-        ERC20    haveToken,
-        ERC20    wantToken,
-        uint128  haveAmount,
-        uint128  wantAmount
-    )
-        pre_cond(isOwner())
-        pre_cond(!isShutDown)
-        pre_cond(isValidAssetPair(haveToken, wantToken))
-        pre_cond(module.riskmgmt.isExchangeMakePermitted(
-            0, // TODO Insert assetpair actual price (formatted the same way as reference price)
-            0, // TODO: Insert assetpair specific price
-            0 // TODO Insert buy quantity
-        ))
-        returns (uint id)
-    {
-        approveSpending(haveToken, haveAmount);
-        id = module.exchange.make(haveToken, wantToken, haveAmount, wantAmount);
-        orders[nextOrderId] = Order({
-            haveToken: haveToken,
-            wantToken: wantToken,
-            haveAmount: haveAmount,
-            wantAmount: wantAmount,
-            timestamp: now,
-            order_status: OrderStatus.open,
-            orderType: OrderType.make,
-            quantity_filled: 0
-        });
-        nextOrderId++;
-    }
-
-    function getIntededSellAmount(address ofAsset) constant returns(uint amt) {
-        for (uint i = 0; i < openOrderIds.length; i++) {
-            Order thisOrder = orders[openOrderIds[i]];
-            if (thisOrder.haveToken == ofAsset) {
-                amt = amt + thisOrder.haveAmount;
-            }
-        }
-    }
-
-    function getIntededBuyAmount(address ofAsset) constant returns(uint amt) {
-        for (uint i = 0; i < openOrderIds.length; i++) {
-            Order thisOrder = orders[openOrderIds[i]];
-            if (thisOrder.wantToken == ofAsset) {
-                amt = amt + thisOrder.wantAmount;
-            }
-        }
-    }
-
-    /// Pre: Active offer (id) and valid buy amount on selected Exchange
-    /// Post: Take offer on selected Exchange
-    function takeOrder(uint256 id, uint256 wantedBuyAmount)
-        pre_cond(isOwner())
-        pre_cond(!isShutDown)
-        returns (bool)
-    {
-        // Inverse variable terminology! Buying what another person is selling
-        var (
-            offeredBuyAmount, offeredBuyToken,
-            offeredSellAmount, offeredSellToken
-        ) = module.exchange.getOffer(id);
-        require(isValidAssetPair(offeredBuyToken, offeredSellToken));
-        require(wantedBuyAmount <= offeredBuyAmount);
-        var orderOwner = module.exchange.getOwner(id);
-        require(module.riskmgmt.isExchangeTakePermitted(
-            0, // TODO Insert assetpair actual price (formatted the same way as reference price)
-            0, // TODO: Insert assetpair specific price
-            0 // TODO Insert buy quantity
-        ));
-        uint256 wantedSellAmount = wantedBuyAmount.mul(offeredSellAmount).div(offeredBuyAmount);
-        approveSpending(offeredSellToken, wantedSellAmount);
-        bool success = module.exchange.buy(id, wantedBuyAmount);
-        orders[nextOrderId] = Order({
-            haveToken: offeredBuyToken,
-            wantToken: offeredSellToken,
-            haveAmount: uint128(offeredBuyAmount),
-            wantAmount: uint128(wantedBuyAmount),
-            timestamp: now,
-            order_status: OrderStatus.fullyFilled,
-            orderType: OrderType.take,
-            quantity_filled: wantedBuyAmount
-        });
-        nextOrderId++;
-        return success;
-    }
-
-    /// Pre: Active offer (id) with owner of this contract on selected Exchange
-    /// Post: Cancel offer on selected Exchange
-    function cancelOrder(uint256 id)
-        pre_cond(isOwner())
-        returns (bool)
-    {
-        return module.exchange.cancel(id);
-    }
-
     /// Pre: To Exchange needs to be approved to spend Tokens on the Managers behalf
     /// Post: Approved to spend ofToken on Exchange
     function approveSpending(ERC20 ofToken, uint256 amount)
@@ -663,7 +463,6 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
     function convertUnclaimedRewards()
         pre_cond(isOwner())
         pre_cond(!isShutDown)
-        pre_cond(noOpenOrders())
     {
         // TODO Assert that all open orders are closed
         var (
@@ -720,25 +519,4 @@ contract Vault is DBC, Owned, Shares, VaultInterface {
     		}
   	}
 
-  	function getOrderHistory(uint start)
-    		constant
-    		returns (
-      			uint[1024] haveAmount, address[1024] haveToken,
-      			uint[1024] wantAmount, address[1024] wantToken,
-      			uint[1024] timestamps, uint[1024] statuses,
-      			uint[1024] types, uint[1024] buyQuantityFilled
-    		)
-  	{
-    		for(uint ii = 0; ii < 1024; ii++){
-      			if(start + ii >= nextOrderId) break;
-      			haveAmount[ii] = orders[start + ii].haveAmount;
-      			haveToken[ii] = orders[start + ii].haveToken;
-      			wantAmount[ii] = orders[start + ii].wantAmount;
-      			wantToken[ii] = orders[start + ii].wantToken;
-      			timestamps[ii] = orders[start + ii].timestamp;
-      			statuses[ii] = uint(orders[start + ii].order_status);   // cast enum
-      			types[ii] = uint(orders[start + ii].orderType);
-      			buyQuantityFilled[ii] = orders[start + ii].quantity_filled;
-    		}
-  	}
 }

@@ -35,7 +35,7 @@ contract('Version', (accounts) => {
     riskManagement = await RiskMgmt.new();
   });
 
-  it('Can create a vault without error', async () => {
+  it.skip('Can create a vault without error', async () => {
     await version.setupVault(
       'Cantaloot',    // name
       'CNLT',         // share symbol
@@ -47,12 +47,12 @@ contract('Version', (accounts) => {
     );
   });
 
-  it('Can retrieve vault from index', async () => {
+  it.skip('Can retrieve vault from index', async () => {
     let vaultId = await version.getLastVaultId();
     assert.equal(vaultId.toNumber(), 0);
   });
 
-  it('Can remove a vault', async () => {
+  it.skip('Can remove a vault', async () => {
     let vaultId = await version.getLastVaultId();
     await version.shutDownVault(vaultId);
   });

@@ -57,7 +57,7 @@ contract('Vault trading', (accounts) => {
     await mlnToken.transfer(vault.address, 1000000, { from: accounts[1] }); // initialize balances
     await ethToken.transfer(vault.address, 1000000, { from: accounts[1] });
   });
-  describe('#makeOrder', () => {
+  describe.skip('#makeOrder', () => {
     const sellAmt = 10000;
     const buyAmt = 2000;
     it('creating order approves token spending for vault', async () => {
@@ -77,7 +77,7 @@ contract('Vault trading', (accounts) => {
       assert.equal(order[6].toNumber(), 0);
     });
   });
-  describe('#takeOrder', () => {
+  describe.skip('#takeOrder', () => {
     const sellAmt = 20000;  // sell/buy from maker's perspective
     const buyAmt = 4000;
     before('make an order to take', async () => {
